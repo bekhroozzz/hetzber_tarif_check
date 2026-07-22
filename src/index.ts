@@ -127,11 +127,24 @@ async function runCheck(
         // Telegram: send once per availability "episode" per server type.
         if (!wasAvailable) {
           const primaryLocation = availableLocations[0];
+          if (notifier.isEnabled) {
+            logger.info(`Sending Telegram notification for ${serverType.toUpperCase()}...`);
+          } else {
+            logger.warn(
+              `${serverType.toUpperCase()} is available but Telegram is disabled ` +
+                `(TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set). No message sent.`,
+            );
+          }
           await notifier.notifyAvailable(
             serverType,
             primaryLocation,
             when,
             buildSpecLines(spec, primaryLocation),
+          );
+        } else {
+          logger.info(
+            `${serverType.toUpperCase()} still available in [${availableLocations.join(', ')}] ` +
+              `(already notified earlier, skipping Telegram).`,
           );
         }
 
