@@ -13,6 +13,11 @@ export interface AppConfig {
   checkIntervalMs: number;
   /** When true, run a single check and exit (for cron / GitHub Actions). */
   runOnce: boolean;
+  /**
+   * In loop mode, stop and exit cleanly after this many milliseconds.
+   * 0 means "run forever". Used to stay under CI job time limits.
+   */
+  maxRuntimeMs: number;
   /** Optional path to persist availability state across runs. */
   stateFile: string | null;
   /** Telegram configuration. Enabled only when both fields are present. */
@@ -81,6 +86,16 @@ export function loadConfig(): AppConfig {
       : 60_000;
 
   const runOnce = optional('RUN_ONCE', 'false').toLowerCase() === 'true';
+
+  const maxRuntimeSeconds = Number.parseInt(
+    optional('MAX_RUNTIME_SECONDS', '0'),
+    10,
+  );
+  const maxRuntimeMs =
+    Number.isFinite(maxRuntimeSeconds) && maxRuntimeSeconds > 0
+      ? maxRuntimeSeconds * 1000
+      : 0;
+
   const stateFileRaw = optional('STATE_FILE', '');
   const stateFile = stateFileRaw !== '' ? stateFileRaw : null;
 
@@ -94,6 +109,7 @@ export function loadConfig(): AppConfig {
     locations,
     checkIntervalMs,
     runOnce,
+    maxRuntimeMs,
     stateFile,
     telegram: {
       enabled: telegramEnabled,

@@ -119,11 +119,22 @@ npm start
 
 ## Free 24/7 deployment via GitHub Actions (no VPS, no card)
 
-You can run the monitor for free using **GitHub Actions on a cron schedule** —
-no server and no credit card required. A ready-to-use workflow is included at
-`.github/workflows/monitor.yml`. It runs a single check every 5 minutes and
-persists the "already notified" state between runs using the Actions cache, so
-Telegram still fires only once per availability episode.
+You can run the monitor for free using **GitHub Actions** — no server and no
+credit card required. A ready-to-use workflow is included at
+`.github/workflows/monitor.yml`.
+
+### How it stays continuous (and why not a 5-minute cron)
+
+GitHub's short cron schedules (like `*/5`) are unreliable — GitHub frequently
+delays or skips them under load. So instead, each workflow run **stays alive
+for ~5 hours and checks every 60 seconds**. A coarse schedule (every 2 hours)
+keeps a fresh run queued; because a `concurrency` group serializes runs, the
+next run takes over seamlessly the moment the current one ends. The result is
+**~60-second detection latency, 24/7, for free** on a public repository.
+
+The "already notified" state is persisted between run handoffs via the Actions
+cache, so Telegram still fires only once per availability episode. Your
+computer/browser does not need to be on — everything runs on GitHub's servers.
 
 ### Steps
 
@@ -153,18 +164,22 @@ git push -u origin main
    - `LOCATIONS` — e.g. `fsn1,nbg1,hel1` (default `fsn1,nbg1,hel1`)
 
 4. **Enable Actions**: open the **Actions** tab and enable workflows if prompted.
-   You can trigger a first run manually with **Run workflow** (the workflow has
-   `workflow_dispatch`), then it will keep running every 5 minutes on its own.
+   Trigger the first run manually with **Run workflow** (the workflow has
+   `workflow_dispatch`). After that it self-sustains: each run lasts ~5h and the
+   schedule keeps the next one queued, so monitoring continues automatically.
 
 ### Good to know
 
-- Public repos get **unlimited free Actions minutes**; private repos get a
-  monthly free allowance (~2000 minutes) which is far more than this needs.
+- Public repos get **unlimited free Actions minutes** — required here, since
+  the monitor runs continuously. A private repo's ~2000 free minutes/month
+  would be exhausted, so **use a public repo** for 24/7 monitoring.
 - Secrets are **encrypted** and safe even in public repositories.
-- GitHub's cron minimum interval is **5 minutes**, and scheduled runs can be
-  slightly delayed during high load — that's normal.
+- Each run self-exits cleanly after `MAX_RUNTIME_SECONDS` (5h) so it finishes
+  green rather than being force-cancelled at GitHub's 6h hard limit.
 - Scheduled workflows are automatically disabled after **60 days** of repo
   inactivity; just push a commit or re-enable to resume.
+- To check less often (e.g. to save minutes on a private repo), raise
+  `CHECK_INTERVAL_SECONDS` and/or switch to the one-shot `RUN_ONCE` mode.
 
 ### Run it as a single check locally
 
@@ -192,8 +207,9 @@ All configuration lives in `.env` (see `.env.example`):
 | `SERVER_TYPES`           | no       | `cx33`             | Comma-separated Hetzner server type names, e.g. `cx33,cx23,cpx31`. |
 | `LOCATIONS`              | no       | `fsn1,nbg1,hel1`   | Comma-separated Hetzner location names.                            |
 | `CHECK_INTERVAL_SECONDS` | no       | `60`               | Seconds between checks (ignored when `RUN_ONCE=true`).            |
-| `RUN_ONCE`               | no       | `false`            | Run one check and exit (used by GitHub Actions cron).            |
-| `STATE_FILE`             | no       | —                  | Path to persist "notified" state across runs (used with cron).   |
+| `RUN_ONCE`               | no       | `false`            | Run one check and exit (one-shot / cron style).                 |
+| `MAX_RUNTIME_SECONDS`    | no       | `0`                | Loop mode: exit cleanly after N seconds (`0` = forever).        |
+| `STATE_FILE`             | no       | —                  | Path to persist "notified" state across runs / handoffs.        |
 
 > Watching several server types adds **no extra API requests** — one
 > `/datacenters` call per cycle covers all of them. Each type is tracked

@@ -193,30 +193,41 @@ async function main(): Promise<void> {
     return;
   }
 
+  const maxRuntimeNote =
+    config.maxRuntimeMs > 0
+      ? ` Max runtime: ${config.maxRuntimeMs / 1000}s.`
+      : '';
   logger.info(
     `Started Hetzner availability monitor. ` +
-      `Interval: ${config.checkIntervalMs / 1000}s. ` +
+      `Interval: ${config.checkIntervalMs / 1000}s.${maxRuntimeNote} ` +
       `Telegram: ${notifier.isEnabled ? 'enabled' : 'disabled'}.`,
   );
 
+  const startedAt = Date.now();
   let running = true;
 
-  const shutdown = (signal: string): void => {
+  const stop = (reason: string, exitCode: number): void => {
     if (!running) {
       return;
     }
     running = false;
-    logger.warn(`Received ${signal}. Shutting down...`);
-    process.exit(0);
+    logger.warn(`${reason} Shutting down...`);
+    saveState(config.stateFile, state);
+    process.exit(exitCode);
   };
 
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => stop('Received SIGINT.', 0));
+  process.on('SIGTERM', () => stop('Received SIGTERM.', 0));
 
   // Recursive scheduling guarantees checks never overlap, even if a single
   // check takes longer than the interval.
   const scheduleNext = (): void => {
     if (!running) {
+      return;
+    }
+    // Stop cleanly before hitting an external time limit (e.g. CI job cap).
+    if (config.maxRuntimeMs > 0 && Date.now() - startedAt >= config.maxRuntimeMs) {
+      stop('Reached max runtime.', 0);
       return;
     }
     setTimeout(async () => {
