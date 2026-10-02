@@ -19,6 +19,26 @@ interface Price {
   price_monthly: { net: string; gross: string };
 }
 
+/** Deprecation info for a server type in a specific location. */
+interface LocationDeprecation {
+  /** ISO date; once in the past the type is permanently unavailable here. */
+  unavailable_after?: string;
+  announced?: string;
+}
+
+/**
+ * Per-location availability for a server type (new API shape, replacing the
+ * removed `/datacenters` endpoint).
+ */
+interface ServerTypeLocation {
+  id: number;
+  name: string;
+  /** True when the type can currently be created in this location. */
+  available: boolean;
+  recommended: boolean;
+  deprecation: LocationDeprecation | null;
+}
+
 interface ServerType {
   id: number;
   name: string;
@@ -27,6 +47,8 @@ interface ServerType {
   disk: number; // in GB
   cpu_type: string; // "shared" | "dedicated"
   prices: Price[];
+  /** Supported locations + per-location availability/deprecation details. */
+  locations: ServerTypeLocation[];
 }
 
 interface ServerTypesResponse {
@@ -44,33 +66,15 @@ export interface ServerTypeSpec {
   priceByLocation: Map<string, { hourlyGross: number; monthlyGross: number }>;
 }
 
-interface Datacenter {
-  id: number;
-  name: string;
-  location: {
-    id: number;
-    name: string;
-  };
-  server_types: {
-    supported: number[];
-    available: number[];
-    available_for_migration: number[];
-  };
-}
-
-interface DatacentersResponse {
-  datacenters: Datacenter[];
-}
-
 /**
  * Thin wrapper around the official Hetzner Cloud REST API.
  *
  * Availability strategy (no resources are ever created):
- * The `/datacenters` endpoint exposes, for every datacenter, which server
- * types are currently `available`. We resolve the server type name (e.g.
- * "cx33") to its numeric id via `/server_types`, then inspect the
- * `available` list of every datacenter belonging to the requested locations.
- * This is the official, side-effect-free way to determine availability.
+ * The `/server_types` endpoint exposes, for every server type, a `locations[]`
+ * array describing in which locations the type is supported and whether it is
+ * currently `available` for creation. (This replaces the old `/datacenters`
+ * endpoint, which Hetzner removed on 2026-10-01 and now returns HTTP 410.)
+ * A single `/server_types` request is both side-effect-free and sufficient.
  */
 /** Maps each requested server type name to its available locations. */
 export type AvailabilityMap = Map<string, string[]>;
@@ -169,57 +173,55 @@ export class HetznerClient {
 
   /**
    * For every requested server type, returns the subset of `locations` where
-   * it is currently available for creation. A single `/datacenters` request
-   * is used regardless of how many server types are checked.
+   * it is currently available for creation, based on the server type's
+   * `locations[]` data. No extra request is needed beyond `/server_types`.
    */
   async getAvailability(
     serverTypeNames: string[],
     locations: string[],
   ): Promise<AvailabilityMap> {
     const typeByName = await this.resolveServerTypes(serverTypeNames);
-    const idByName = new Map<string, number>();
-    for (const [name, type] of typeByName) {
-      idByName.set(name, type.id);
-    }
-    const wanted = new Set(locations.map((location) => location.toLowerCase()));
+    const wanted = locations.map((location) => location.toLowerCase());
 
-    try {
-      const { data } = await this.http.get<DatacentersResponse>(
-        '/datacenters',
-        { params: { per_page: 100 } },
+    const result: AvailabilityMap = new Map();
+    for (const name of serverTypeNames) {
+      const key = name.toLowerCase();
+      const type = typeByName.get(key);
+
+      // Index this type's locations by name for quick lookup.
+      const byLocation = new Map<string, ServerTypeLocation>();
+      for (const loc of type?.locations ?? []) {
+        byLocation.set(loc.name.toLowerCase(), loc);
+      }
+
+      // Keep only requested locations where the type is available right now,
+      // preserving the caller's original ordering.
+      const available = wanted.filter((location) =>
+        this.isAvailableAt(byLocation.get(location)),
       );
-
-      // For each server type id, collect the set of locations where available.
-      const availableByName = new Map<string, Set<string>>();
-      for (const name of serverTypeNames) {
-        availableByName.set(name.toLowerCase(), new Set<string>());
-      }
-
-      for (const datacenter of data.datacenters) {
-        const locationName = datacenter.location.name.toLowerCase();
-        if (!wanted.has(locationName)) {
-          continue;
-        }
-        for (const [name, id] of idByName) {
-          if (datacenter.server_types.available.includes(id)) {
-            availableByName.get(name)?.add(locationName);
-          }
-        }
-      }
-
-      // Build the result preserving caller ordering for both dimensions.
-      const result: AvailabilityMap = new Map();
-      for (const name of serverTypeNames) {
-        const availableSet = availableByName.get(name.toLowerCase()) ?? new Set();
-        result.set(
-          name.toLowerCase(),
-          locations.filter((location) => availableSet.has(location.toLowerCase())),
-        );
-      }
-      return result;
-    } catch (error) {
-      throw this.toApiError(error);
+      result.set(key, available);
     }
+
+    return result;
+  }
+
+  /**
+   * Decides whether a server type is currently available for creation in a
+   * given location entry: it must exist (supported), be flagged available,
+   * and not be permanently retired (deprecation date in the past).
+   */
+  private isAvailableAt(loc: ServerTypeLocation | undefined): boolean {
+    if (!loc || !loc.available) {
+      return false;
+    }
+    const unavailableAfter = loc.deprecation?.unavailable_after;
+    if (unavailableAfter) {
+      const retireDate = new Date(unavailableAfter).getTime();
+      if (Number.isFinite(retireDate) && retireDate <= Date.now()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

@@ -13,18 +13,22 @@ available — in the console (with a large green banner) and, optionally, via
 
 ## How availability is detected (no resources created)
 
-Hetzner does not expose a single boolean "available" flag on a server type, and
-there is no "dry-run" for server creation. The correct, side-effect-free way to
-check availability is the [`/datacenters`](https://docs.hetzner.cloud/#datacenters)
-endpoint: every datacenter reports which server types are currently
-`available` for creation.
+There is no "dry-run" for server creation. The correct, side-effect-free way to
+check availability is the [`/server_types`](https://docs.hetzner.cloud/#server-types)
+endpoint: each server type includes a `locations[]` array describing the
+locations it supports and, per location, whether it is currently `available`
+for creation.
+
+> Note: Hetzner **removed** the old `/datacenters` endpoint on 2026-10-01 (it
+> now returns `HTTP 410 Gone`) and moved availability into `server_types`. This
+> project uses the new `locations[]` model.
 
 This project:
 
-1. Resolves the server type name (`cx33`) to its numeric id via
-   [`/server_types`](https://docs.hetzner.cloud/#server-types).
-2. Fetches all datacenters and, for the datacenters belonging to your chosen
-   locations, checks whether the `cx33` id is present in `server_types.available`.
+1. Fetches [`/server_types`](https://docs.hetzner.cloud/#server-types) once.
+2. For each watched type (e.g. `cx43`), finds its entry for each of your
+   chosen locations and treats it as available when `locations[].available`
+   is `true` and it is not permanently retired.
 
 No servers are ever created, so you are never billed for this check.
 
