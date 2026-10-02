@@ -59,7 +59,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # Read from repository Variables first, then Secrets, then default.
-          SERVER_TYPES: ${{ vars.SERVER_TYPES || secrets.SERVER_TYPES || 'cx33' }}
+          SERVER_TYPES: ${{ vars.SERVER_TYPES || secrets.SERVER_TYPES || 'cx43' }}
           LOCATIONS: ${{ vars.LOCATIONS || secrets.LOCATIONS || 'fsn1,nbg1,hel1' }}
           CHECK_INTERVAL_SECONDS: "60"
           MAX_RUNTIME_SECONDS: "18000"
