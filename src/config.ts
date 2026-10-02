@@ -53,7 +53,7 @@ export function loadConfig(): AppConfig {
 
   // Accepts a comma-separated list via SERVER_TYPES; falls back to the legacy
   // single-value SERVER_TYPE, then to "cx33". Duplicates are removed.
-  const rawServerTypes = optional('SERVER_TYPES', optional('SERVER_TYPE', 'cx33'));
+  const rawServerTypes = optional('SERVER_TYPES', optional('SERVER_TYPE', 'cx43'));
   const serverTypes = Array.from(
     new Set(
       rawServerTypes
